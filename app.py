@@ -3,8 +3,13 @@ import datetime
 from flask import Flask, request, jsonify
 from flask_mysqldb import MySQL, MySQLdb
 from flask_bcrypt import Bcrypt
+from flask import Flask
+from flask_cors import CORS
+from functools import wraps
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
+CORS(app)
 bcrypt = Bcrypt(app)
 
 # Configuración de la base de datos
@@ -15,12 +20,55 @@ app.config['MYSQL_DB'] = 'melodiadb'
 
 mysql = MySQL(app)
 
-SECRET_KEY = "tu_clave_secreta_para_jwt"
+SECRET_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OSwiZXhwIjoxNzEzODE3MzQ3fQ.GmHu8yBhJvmqNjQrHETBblpJX8lwAN7KXFOP0sg4XzA"
+
+def token_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 403
+
+        try:
+            if token.startswith('Bearer '):
+                token = token[7:]
+            payload = jwt.decode(token,SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Invalid token'}), 401
+        except TypeError:
+            return jsonify({'message': 'An error occurred during token decoding'}), 500
+
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+@app.route('/refresh_token', methods=['POST'])
+def refresh_token():
+    token = request.headers.get('Authorization')
+    if not token or not token.startswith('Bearer '):
+        return jsonify({'message': 'Token is missing or invalid'}), 401
+    
+    try:
+        decoded_token = jwt.decode(token[7:], SECRET_KEY, algorithms=['HS256'], options={"verify_exp": False})
+        exp = datetime.utcfromtimestamp(decoded_token['exp'])
+        now = datetime.utcnow()
+        if exp - now < timedelta(seconds=15):
+            new_token = jwt.encode({
+                'id': decoded_token['id'],
+                'exp': datetime.utcnow() + timedelta(minutes=1)
+            }, SECRET_KEY, algorithm='HS256')
+            return jsonify({'token': new_token}), 200
+        else:
+            return jsonify({'message': 'Token not yet ready for renewal'}), 400
+    except jwt.InvalidTokenError:
+        return jsonify({'message': 'Invalid token provided'}), 401
+
 
 @app.route('/registro', methods=['POST'])
-
 def register():
-    # Obtener datos del request
     email = request.json['email']
     plain_text_password = request.json['password']
     nombre = request.json['nombre']
@@ -57,7 +105,7 @@ def login():
         if user and bcrypt.check_password_hash(user['contraseña'], password_candidate):
             token = jwt.encode({
                 'id': user['idUsuario'],
-                'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+                'exp': datetime.utcnow() + timedelta(minutes=1)
             }, SECRET_KEY, algorithm='HS256')
             user_data = {
                 'idUsuario': user['idUsuario'],
