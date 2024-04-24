@@ -55,10 +55,10 @@ def refresh_token():
         decoded_token = jwt.decode(token[7:], SECRET_KEY, algorithms=['HS256'], options={"verify_exp": False})
         exp = datetime.utcfromtimestamp(decoded_token['exp'])
         now = datetime.utcnow()
-        if exp - now < timedelta(seconds=15):
+        if exp - now < timedelta(seconds=60):
             new_token = jwt.encode({
                 'id': decoded_token['id'],
-                'exp': datetime.utcnow() + timedelta(minutes=1)
+                'exp': datetime.utcnow() + timedelta(minutes=5)
             }, SECRET_KEY, algorithm='HS256')
             return jsonify({'token': new_token}), 200
         else:
@@ -105,7 +105,7 @@ def login():
         if user and bcrypt.check_password_hash(user['contraseña'], password_candidate):
             token = jwt.encode({
                 'id': user['idUsuario'],
-                'exp': datetime.utcnow() + timedelta(minutes=1)
+                'exp': datetime.utcnow() + timedelta(minutes=5)
             }, SECRET_KEY, algorithm='HS256')
             user_data = {
                 'idUsuario': user['idUsuario'],
