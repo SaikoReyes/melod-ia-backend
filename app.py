@@ -1,12 +1,18 @@
 import jwt
 import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify   
 from flask_mysqldb import MySQL, MySQLdb
 from flask_bcrypt import Bcrypt
 from flask import Flask
 from flask_cors import CORS
 from functools import wraps
 from datetime import datetime, timedelta
+from flask import send_file
+import xml.etree.ElementTree as ET
+import os
+import time
+import logging
+  
 
 app = Flask(__name__)
 CORS(app)
@@ -122,13 +128,89 @@ def login():
     finally:
         cursor.close()
 
-@app.route('/usuarios')
-def usuarios():
-    cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-    cur.execute("SELECT * FROM usuarios")
-    resultados = cur.fetchall()
-    cur.close()
-    return jsonify(resultados)
+
+def save_to_database(user_id, xml_data, text):
+    cursor = mysql.connection.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO partituras (idUsuario, partitura, texto, fechaCreacion) VALUES (%s, %s, %s, NOW())",
+            (user_id, xml_data, text)
+        )
+        mysql.connection.commit()
+        return cursor.lastrowid  # Retorna el ID de la fila insertada
+    except Exception as e:
+        mysql.connection.rollback()
+        logging.error("Error al guardar en la base de datos: " + str(e))
+        return None  # Retorna None si hay error
+    finally:
+        cursor.close()
+
+@app.route('/generate_xml', methods=['POST'])
+@token_required
+def generate_xml():
+    user_input = request.json.get('text', '')
+    user_id = request.json.get('user_id', None)
+    processed_text = f"{user_input} aleatorio"
+    with open('Bajo1.xml', 'rb') as file:
+        xml_content = file.read()
+    partitura_id = save_to_database(user_id, xml_content, processed_text)
+    if partitura_id:
+        return jsonify({'message': "Archivo procesado y guardado con éxito", 'partitura_id': partitura_id}), 200
+    else:
+        return jsonify({'error': "Error al guardar el archivo"}), 500
+
+@app.route('/get_xml_by_id/<int:partitura_id>', methods=['GET'])
+@token_required
+def get_xml_by_id(partitura_id):
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    try:
+        cursor.execute("SELECT partitura, texto FROM partituras WHERE idPartitura = %s", (partitura_id,))
+        result = cursor.fetchone()
+        if result:
+            xml_data = result['partitura']
+            texto = result['texto']
+            try:
+                xml_string = xml_data.decode('utf-8') if isinstance(xml_data, bytes) else xml_data
+                return jsonify({'xml': xml_string, 'texto': texto}), 200
+            except UnicodeDecodeError as e:
+                return jsonify({'error': 'Failed to decode XML'}), 500
+        else:
+            return jsonify({'message': 'XML not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+
+
+@app.route('/get_user_history/<int:user_id>', methods=['GET'])
+@token_required
+def get_user_history(user_id):
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    try:
+        cursor.execute("SELECT idPartitura, LEFT(texto, 50) as texto FROM partituras WHERE idUsuario = %s", (user_id,))
+        partituras = cursor.fetchall()
+        return jsonify(partituras), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+
+
+@app.route('/delete_partitura/<int:partitura_id>', methods=['DELETE'])
+@token_required
+def delete_partitura(partitura_id):
+    cursor = mysql.connection.cursor()
+    try:
+        cursor.execute("DELETE FROM partituras WHERE idPartitura = %s", (partitura_id,))
+        mysql.connection.commit()
+        return jsonify({'message': 'Partitura eliminada'}), 200
+    except Exception as e:
+        mysql.connection.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+
+
 
 
 if __name__ == '__main__':
