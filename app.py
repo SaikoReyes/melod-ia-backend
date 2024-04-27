@@ -7,26 +7,21 @@ from flask import Flask
 from flask_cors import CORS
 from functools import wraps
 from datetime import datetime, timedelta
-from flask import send_file
-import xml.etree.ElementTree as ET
-import os
-import time
 import logging
+from config import Config
   
 
 app = Flask(__name__)
+
 CORS(app)
+
 bcrypt = Bcrypt(app)
 
-# Configuración de la base de datos
-app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = 'password'
-app.config['MYSQL_DB'] = 'melodiadb'
+app.config.from_object(Config)
 
 mysql = MySQL(app)
 
-SECRET_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OSwiZXhwIjoxNzEzODE3MzQ3fQ.GmHu8yBhJvmqNjQrHETBblpJX8lwAN7KXFOP0sg4XzA"
+SECRET_KEY = Config.SECRET_KEY
 
 def token_required(f):
     @wraps(f)
@@ -137,14 +132,15 @@ def save_to_database(user_id, xml_data, text):
             (user_id, xml_data, text)
         )
         mysql.connection.commit()
-        return cursor.lastrowid  # Retorna el ID de la fila insertada
+        return cursor.lastrowid
     except Exception as e:
         mysql.connection.rollback()
         logging.error("Error al guardar en la base de datos: " + str(e))
-        return None  # Retorna None si hay error
+        return None 
     finally:
         cursor.close()
 
+#Endpoint a modificar para la generación de la partitura
 @app.route('/generate_xml', methods=['POST'])
 @token_required
 def generate_xml():
@@ -215,4 +211,4 @@ def delete_partitura(partitura_id):
 
 if __name__ == '__main__':
     
-    app.run(port=8000, debug=True)
+    app.run(port=8000, debug=app.config['DEBUG'])
