@@ -9,7 +9,9 @@ from functools import wraps
 from datetime import datetime, timedelta
 import logging
 from config import Config
-  
+from IntegracionMelodIA import Integracion
+import torch
+from div_sila import separar_silabas_en_una_lista
 
 app = Flask(__name__)
 
@@ -23,6 +25,7 @@ mysql = MySQL(app)
 
 SECRET_KEY = Config.SECRET_KEY
 
+PartitureGen = None
 def token_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -46,7 +49,11 @@ def token_required(f):
     return decorated_function
 
 
-@app.route('/refresh_token', methods=['POST'])
+@app.route("/api/dev", methods=["GET", "OPTIONS"])
+def test_api():
+    return app.make_response(({"message": "Ok"}, 200))
+
+@app.route('/api/refresh_token', methods=['POST', "OPTIONS"])
 def refresh_token():
     token = request.headers.get('Authorization')
     if not token or not token.startswith('Bearer '):
@@ -68,7 +75,7 @@ def refresh_token():
         return jsonify({'message': 'Invalid token provided'}), 401
 
 
-@app.route('/registro', methods=['POST'])
+@app.route('/api/registro', methods=['POST', "OPTIONS"])
 def register():
     email = request.json['email']
     plain_text_password = request.json['password']
@@ -95,7 +102,7 @@ def register():
 
     return jsonify(response), status_code
 
-@app.route('/login', methods=['POST'])
+@app.route('/api/login', methods=['POST', "OPTIONS"])
 def login():
     email = request.json['email']
     password_candidate = request.json['password']
@@ -115,7 +122,8 @@ def login():
                 'apellido': user['apellido'],
                 'token': token
             }
-            return jsonify(user_data), 200
+            
+            return jsonify(user_data), 200 #app.make_response(( jsonify(user_data), 200, { "Access-Control-Allow-Origin": "*" } ))  #jsonify(user_data), 200
         else:
             return jsonify({'error': 'Usuario o contraseña incorrectos'}), 401
     except Exception as e:
@@ -141,21 +149,26 @@ def save_to_database(user_id, xml_data, text):
         cursor.close()
 
 #Endpoint a modificar para la generación de la partitura
-@app.route('/generate_xml', methods=['POST'])
+@app.route('/api/generate_xml', methods=['POST', "OPTIONS"])
 @token_required
 def generate_xml():
     user_input = request.json.get('text', '')
     user_id = request.json.get('user_id', None)
-    processed_text = f"{user_input} aleatorio"
-    with open('Bajo1.xml', 'rb') as file:
-        xml_content = file.read()
-    partitura_id = save_to_database(user_id, xml_content, processed_text)
+    lyrs =separar_silabas_en_una_lista(user_input)
+    file = PartitureGen.gen_melody(len(lyrs), lyrs)
+    xml_content = file.read()
+    print("Subiendo a base de datos")
+    partitura_id = save_to_database(user_id, xml_content, user_input)
+    print("Subido a base de datos")
+    file.close()
+    print("archibo jerenao")
+    print(xml_content)
     if partitura_id:
         return jsonify({'message': "Archivo procesado y guardado con éxito", 'partitura_id': partitura_id}), 200
     else:
         return jsonify({'error': "Error al guardar el archivo"}), 500
 
-@app.route('/get_xml_by_id/<int:partitura_id>', methods=['GET'])
+@app.route('/api/get_xml_by_id/<int:partitura_id>', methods=['GET', "OPTIONS"])
 @token_required
 def get_xml_by_id(partitura_id):
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
@@ -178,7 +191,7 @@ def get_xml_by_id(partitura_id):
         cursor.close()
 
 
-@app.route('/get_user_history/<int:user_id>', methods=['GET'])
+@app.route('/api/get_user_history/<int:user_id>', methods=['GET', "OPTIONS"])
 @token_required
 def get_user_history(user_id):
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
@@ -192,7 +205,7 @@ def get_user_history(user_id):
         cursor.close()
 
 
-@app.route('/delete_partitura/<int:partitura_id>', methods=['DELETE'])
+@app.route('/api/delete_partitura/<int:partitura_id>', methods=['DELETE', "OPTIONS"])
 @token_required
 def delete_partitura(partitura_id):
     cursor = mysql.connection.cursor()
@@ -210,5 +223,5 @@ def delete_partitura(partitura_id):
 
 
 if __name__ == '__main__':
-    
-    app.run(port=8000, debug=app.config['DEBUG'])
+    PartitureGen = Integracion()
+    app.run(port=8000, debug=True)
